@@ -46,6 +46,19 @@ repo. The ADK equivalent of LangChain's `ModelRouterMiddleware`.
 - `pytest -q` -- full suite; live tests skip without a key
 - `pytest -q tests/test_router.py tests/test_jev_client.py` -- offline only
 
+## Observability
+- `audit.py` provides `AuditLog`: in-memory `events` list plus an optional
+  JSONL file (`AuditLog(path="audit.jsonl")`, one line per decision).
+- Pass `audit=` to `make_jev_model_router()`; every callback records one event:
+  `ts`, `component="router"`, `jev_model`, `prompt_preview` (200 chars),
+  `prompt_hash` (sha256[:16] for correlation without storing full prompts),
+  `tier`, `probabilities`, `previous_model`, `chosen_model`, `latency_ms`,
+  and `verdict` in {routed-fast, routed-deep, fallback-default} with a
+  `reason` on fallbacks.
+- `audit.summary()` -> `{"total": n, "by_verdict": {...}}`.
+- `demo.py --audit PATH` exercises the full audit path end to end.
+- No credentials are ever recorded. `audit=None` (default) keeps zero overhead.
+
 ## Tuning
 - Tier criteria live in `router.ROUTE_QUESTION`; keep the keys ("fast"/"deep")
   in sync with the `choices` mapping passed to `make_jev_model_router`.
