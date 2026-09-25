@@ -6,9 +6,11 @@ Live:   python demo.py --live   (needs OPENROUTER_API_KEY, or run inside Muse)
 """
 
 import argparse
+import json
 import sys
 from types import SimpleNamespace
 
+from audit import AuditLog
 from router import DEEP_MODEL, FAST_MODEL, last_user_text, make_jev_model_router
 
 SAMPLES = [
@@ -52,13 +54,19 @@ def run(callback, label):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true", help="call the real Jev API")
+    ap.add_argument("--audit", metavar="PATH", default=None,
+                    help="write a JSONL audit log of every routing decision to PATH")
     ns = ap.parse_args()
 
+    audit = AuditLog(path=ns.audit) if ns.audit else None
     if ns.live:
-        run(make_jev_model_router(), "LIVE Jev routing (typesafe/jev-1.13 via OpenRouter Decisions API)")
+        run(make_jev_model_router(audit=audit), "LIVE Jev routing (typesafe/jev-1.13 via OpenRouter Decisions API)")
     else:
-        run(make_jev_model_router(decide_fn=mock_decide), "MOCK Jev routing (no API calls)")
+        run(make_jev_model_router(decide_fn=mock_decide, audit=audit), "MOCK Jev routing (no API calls)")
         print("\nTip: re-run with --live to route the same prompts with real Jev.")
+    if audit is not None:
+        print(f"\naudit: {len(audit)} routing decisions recorded -> {ns.audit}")
+        print(f"summary: {json.dumps(audit.summary())}")
 
 
 if __name__ == "__main__":

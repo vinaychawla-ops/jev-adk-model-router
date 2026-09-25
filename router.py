@@ -26,6 +26,8 @@ Usage::
 import logging
 from typing import Callable, Dict, Optional, Tuple
 
+from audit import AuditLog, prompt_hash, prompt_preview
+from jev_client import MODEL as JEV_MODEL
 from jev_client import JevError, choice_selection, decide
 
 logger = logging.getLogger(__name__)
@@ -101,6 +103,7 @@ def make_jev_model_router(
     decide_fn: Callable = None,
     choices: Dict[str, str] = None,
     model: Optional[str] = None,
+    audit: Optional[AuditLog] = None,
 ):
     """Build a ``before_model_callback(callback_context, llm_request)``.
 
@@ -117,27 +120,48 @@ def make_jev_model_router(
         choices: maps Jev tier keys to model names. Keys must match the
             ``criteria`` keys of the route question (``"fast"``/``"deep"``).
         model: override the Jev model pin (default ``typesafe/jev-1.13``).
+        audit: optional :class:`audit.AuditLog`. Every routing decision --
+            including fallbacks -- is recorded for auditing.
     """
     _decide = decide_fn or decide
     _choices = dict(choices or DEFAULT_CHOICES)
+    _audit = audit
+    _jev_model = model or JEV_MODEL
+
+    def _record(prompt, **fields):
+        if _audit is not None:
+            _audit.record({
+                "component": "router",
+                "jev_model": _jev_model,
+                "prompt_preview": prompt_preview(prompt),
+                "prompt_hash": prompt_hash(prompt),
+                **fields,
+            })
 
     def jev_before_model_callback(callback_context, llm_request):
         prompt = last_user_text(getattr(llm_request, "contents", None))
+        previous = getattr(llm_request, "model", None)
         if not prompt:
             logger.warning("Jev router: no user text found; keeping default model")
+            _record(prompt, verdict="fallback-default", reason="no user text in request",
+                    previous_model=previous, chosen_model=previous)
             return None
         try:
             model_name, info = route_prompt(prompt, decide_fn=_decide, choices=_choices, model=model)
         except JevError as exc:
             logger.warning("Jev routing failed (%s); keeping default model", exc)
+            _record(prompt, verdict="fallback-default", reason=str(exc),
+                    previous_model=previous, chosen_model=previous)
             return None
-        previous = getattr(llm_request, "model", None)
         llm_request.model = model_name
         probs = ", ".join(f"{k}={v:.2f}" for k, v in info["probabilities"].items())
         logger.info(
             "JEV ROUTE: tier=%s (%s) %s -> %s (%.0f ms)",
             info["tier"], probs, previous, model_name, info["latency_ms"],
         )
+        _record(prompt, verdict=f"routed-{info['tier']}", tier=info["tier"],
+                probabilities=info["probabilities"], previous_model=previous,
+                chosen_model=model_name, latency_ms=info["latency_ms"])
         return None  # proceed with the rerouted request
 
     return jev_before_model_callback

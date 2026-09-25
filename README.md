@@ -67,6 +67,26 @@ If Jev is unreachable or returns an unknown tier, the agent's configured
 (cheap default) model is kept and a warning is logged -- routing degrades to
 "always fast", never to an error.
 
+## Observability
+
+Pass an `AuditLog` to record every routing decision -- tier chosen,
+per-tier probabilities, previous vs chosen model, latency, and fallbacks:
+
+```python
+from audit import AuditLog
+from router import make_jev_model_router
+
+audit = AuditLog(path="audit.jsonl")  # omit path for in-memory only
+callback = make_jev_model_router(audit=audit)
+...
+print(audit.summary())
+# {'total': 12, 'by_verdict': {'routed-fast': 9, 'routed-deep': 2, 'fallback-default': 1}}
+```
+
+`python demo.py --audit audit.jsonl` writes a line-per-decision JSONL trail
+you can grep or load into a dataframe. Prompts are stored as a truncated
+preview plus a SHA-256 hash; credentials are never recorded.
+
 ## Jev API notes
 
 - Endpoint is `POST https://openrouter.ai/api/alpha/decisions` -- the
@@ -81,6 +101,7 @@ If Jev is unreachable or returns an unknown tier, the agent's configured
 
 - `jev_client.py` -- stdlib-only Jev Decisions API client
 - `router.py` -- `make_jev_model_router()`: the ADK `before_model_callback`
+- `audit.py` -- `AuditLog`: in-memory + JSONL audit trail of every decision
 - `agent.py` -- working ADK agent (flash default, Jev-routed per request)
 - `demo.py` -- mock or `--live` end-to-end demo
 - `tests/` -- mocked unit tests + live integration tests (skipped without a key)
